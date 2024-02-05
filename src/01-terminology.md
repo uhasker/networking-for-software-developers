@@ -59,3 +59,10 @@ Install the following packages:
 
 Note that you will need to run most of the tools as root.
 We will not mention this again within the book and we will not prefix the respective commands with `sudo` to cut down on irrelevant noise.
+
+## TODOS
+
+Add notes on:
+
+- how to read a hex dump
+- how to start a Wireshark capture
