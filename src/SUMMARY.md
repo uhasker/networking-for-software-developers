@@ -6,3 +6,6 @@
 - [IPv4](./04-ipv4.md)
 - [TCP](./05-tcp.md)
 - [UDP](./06-udp.md)
+- [HTTP Basics](./07-http-basics.md)
+- [HTTP Security](./08-http-security.md)
+- [HTTPS](./09-https.md)

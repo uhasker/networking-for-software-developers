@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SSE Example</title>
+</head>
+
+<body>
+    <h1>Server-Side Events Example</h1>
+    <div id="messages"></div>
+    <script>
+        const evtSource = new EventSource("http://localhost:5000/events");
+
+        evtSource.onmessage = function (event) {
+            const messages = document.getElementById("messages");
+            const newElement = document.createElement("div");
+            newElement.textContent = "Message: " + event.data;
+            messages.appendChild(newElement);
+        };
+
+        // Listen for the special "close" event
+        evtSource.addEventListener(
+            "complete",
+            function (event) {
+                evtSource.close(); // Close the connection
+                const messages = document.getElementById("messages");
+                const newElement = document.createElement("div");
+                newElement.textContent = "Stream complete. Connection closed.";
+                messages.appendChild(newElement);
+            },
+            false
+        );
+    </script>
+</body>
+
+</html>
